@@ -1,0 +1,2 @@
+- Add JSON-streaming option to neo4j-connect
+- Use transaction URL from initial Neo4j status response
