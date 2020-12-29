@@ -2,6 +2,7 @@
 (require racket/class
          racket/pretty
          racket/string
+         racket/list
          net/url
          json
          db/private/generic/interfaces
@@ -60,34 +61,45 @@
     ;; query         : symbol statement boolean -> QueryResult
     (define/public (query sym statement cursor?)
       (if connected
-        (call-with-lock sym (lambda () (query:query statement)))
+        (call-with-lock sym (lambda () (query:query sym statement)))
         (error sym "Not connected")))
 
-    (define/private (query:query statement)
+    (define/private (query:query sym statement)
       (if (get-tx-status)
-        (query:in-transaction statement)
-        (query:single-query statement)))
+        (query:in-transaction sym statement)
+        (query:single-query sym statement)))
 
-    (define/private (query:in-transaction statemet)
+    (define/private (query:in-transaction sym statement)
       null)
 
-    (define/private (query:single-query statement)
+    (define/private (query:single-query sym statement)
       (let*-values ([(data) (prepare-data statement)]
                     [(status headers in) (connecton-fn single-url
                                                        #:method #"POST"
                                                        #:headers headers
                                                        #:data data)]
                     [(result-json) (read-json in)])
-        (decode-result result-json)))
+        (result:decode-result sym result-json)))
 
     (define/private (prepare-data stat)
       (jsexpr->string (make-hash `((statements . (,(make-hash `((statement . ,stat)))))))))
 
-    (define/private (decode-result result)
-      (rows-result (hash-ref (car (hash-ref result 'results)) 'columns)
+    (define/private (result:decode-result sym result)
+      (let ([errors (hash-ref result 'errors)])
+        (if (not (empty? errors))
+            (result:raise-error sym errors)
+            (result:format-rows-result (car (hash-ref result 'results))))))
+
+    (define/private (result:format-rows-result results)
+      (rows-result (hash-ref results 'columns)
                    (map (lambda (v) (list->vector (hash-ref v 'row)))
-                        (hash-ref (car (hash-ref result 'results)) 'data)
-                             )))
+                        (hash-ref results 'data))))
+
+    (define/private (result:raise-error who errors)
+      (raise-sql-error who
+                       (hash-ref (car errors) 'code)
+                       (hash-ref (car errors) 'message)
+                       null))
 
     ;; prepare       : symbol preparable boolean -> prepared-statement<%>
     (define/public (prepare)
