@@ -8,6 +8,7 @@
   (->* []
        [#:server (or/c string? #f)
         #:port (or/c exact-positive-integer? #f)
+        #:database string?
         #:user (or/c string? #f)
         #:password (or/c string? #f)
         #:debug? any/c]

@@ -1,5 +1,6 @@
 #lang racket/base
 (require racket/class
+         racket/pretty
          racket/string
          net/url
          json
@@ -8,16 +9,20 @@
 
 (provide neo4j-connect)
 
+(define (discovery-url server port)
+  (make-url "http" #f server port #t null null #f))
+
 (define connection%
   (class* transactions% (connection<%>)
     (inherit dprintf
              call-with-lock
              get-tx-status)
+    (init-field [connecton-fn http-sendrecv/url])
     (inherit-field DEBUG?)
 
     (define connected #f)
-    (define url null)
-    (define commit-url null)
+    (define tx-url null)
+    (define single-url null)
     (define headers '(#"Accept: application/json"
                       #"Content-Type: application/json"))
     (define info null)
@@ -25,15 +30,17 @@
     (super-new)
 
     (define/public (start-connection-protocol server port database user password)
-      (define discovery-url (make-url "http" #f server port #t null null #f))
-      (let-values ([(status headers content) (http-sendrecv/url discovery-url #:headers headers)])
+      (let*-values ([(disc-url) (discovery-url server port)]
+                    [(status _ content) (connecton-fn disc-url #:headers headers)])
         (when (string-suffix? (bytes->string/utf-8 status) "200 OK")
-          (set! connected #t)
-          (set! info (read-json content))
-          (when DEBUG? (dprintf "Connected to ~a\n" info))
-          (set! url (string->url (string-replace (hash-ref info 'transaction) "{databaseName}" database))))
-          (set! commit-url (string->url (string-append (url->string url) "/commit")))
-          ))
+          (setup-object (read-json content) database))))
+
+    (define/private (setup-object parsed-info database)
+      (set! connected #t)
+      (set! info parsed-info)
+      (when DEBUG? (dprintf "Connected to ~a\n" (pretty-format info)))
+      (set! tx-url (string->url (string-replace (hash-ref info 'transaction) "{databaseName}" database)))
+      (set! single-url (string->url (string-append (url->string tx-url) "/commit"))))
 
     (define/public (get-info)
       info)
@@ -66,10 +73,10 @@
 
     (define/private (query:single-query statement)
       (let*-values ([(data) (prepare-data statement)]
-                    [(status headers in) (http-sendrecv/url commit-url
-                                                           #:method #"POST"
-                                                           #:headers headers
-                                                           #:data data)]
+                    [(status headers in) (connecton-fn single-url
+                                                       #:method #"POST"
+                                                       #:headers headers
+                                                       #:data data)]
                     [(result-json) (read-json in)])
         (decode-result result-json)))
 
