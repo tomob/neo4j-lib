@@ -13,6 +13,30 @@
 (define (discovery-url server port)
   (make-url "http" #f server port #t null null #f))
 
+(define (decode-result sym result)
+  (let ([errors (hash-ref result 'errors)]
+        [results (hash-ref result 'results)])
+    (cond
+      [(not (empty? errors)) (raise-error sym errors)]
+      [(and (empty? (hash-ref (car results) 'columns))
+            (empty? (hash-ref (car results) 'data)))
+        (format-simple-result (car results))]
+      [else (format-rows-result (car results))])))
+
+(define (format-rows-result results)
+  (rows-result (hash-ref results 'columns)
+                (map (lambda (v) (list->vector (hash-ref v 'row)))
+                    (hash-ref results 'data))))
+
+(define (format-simple-result results)
+  (simple-result (hash-ref results `stats)))
+
+(define (raise-error who errors)
+  (raise-sql-error who
+                    (hash-ref (car errors) 'code)
+                    (hash-ref (car errors) 'message)
+                    null))
+
 (define connection%
   (class* transactions% (connection<%>)
     (inherit dprintf
@@ -79,27 +103,14 @@
                                                        #:headers headers
                                                        #:data data)]
                     [(result-json) (read-json in)])
+        (dprintf "Received result: ~a\n" (pretty-format result-json))
         (result:decode-result sym result-json)))
 
     (define/private (prepare-data stat)
-      (jsexpr->string (make-hash `((statements . (,(make-hash `((statement . ,stat)))))))))
+      (jsexpr->string (hash `statements (list (hash `statement stat `includeStats  #t)))))
 
     (define/private (result:decode-result sym result)
-      (let ([errors (hash-ref result 'errors)])
-        (if (not (empty? errors))
-            (result:raise-error sym errors)
-            (result:format-rows-result (car (hash-ref result 'results))))))
-
-    (define/private (result:format-rows-result results)
-      (rows-result (hash-ref results 'columns)
-                   (map (lambda (v) (list->vector (hash-ref v 'row)))
-                        (hash-ref results 'data))))
-
-    (define/private (result:raise-error who errors)
-      (raise-sql-error who
-                       (hash-ref (car errors) 'code)
-                       (hash-ref (car errors) 'message)
-                       null))
+      (decode-result sym result))
 
     ;; prepare       : symbol preparable boolean -> prepared-statement<%>
     (define/public (prepare)
