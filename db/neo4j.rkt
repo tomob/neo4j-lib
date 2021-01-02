@@ -6,10 +6,10 @@
 (provide/contract
  [neo4j-connect
   (->* []
-       [#:server (or/c string? #f)
-        #:port (or/c exact-positive-integer? #f)
+       [#:server string?
+        #:port exact-positive-integer?
         #:database string?
         #:user (or/c string? #f)
         #:password (or/c string? #f)
-        #:debug? any/c]
+        #:debug? boolean?]
        connection?)])

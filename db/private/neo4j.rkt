@@ -3,6 +3,7 @@
          racket/pretty
          racket/string
          racket/list
+         racket/port
          net/url
          json
          db/private/generic/interfaces
@@ -63,7 +64,7 @@
     (define/private (setup-object parsed-info database)
       (set! connected #t)
       (set! info parsed-info)
-      (when DEBUG? (dprintf "Connected to ~a\n" (pretty-format info)))
+      (when DEBUG? (dprintf "** connected to ~a\n" (pretty-format info)))
       (set! tx-url (string->url (string-replace (hash-ref info 'transaction) "{databaseName}" database)))
       (set! single-url (string->url (string-append (url->string tx-url) "/commit"))))
 
@@ -98,12 +99,15 @@
 
     (define/private (query:single-query sym statement)
       (let*-values ([(data) (prepare-data statement)]
+                    [(_) (dprintf ">> sending request: ~a\n" (pretty-format data))]
                     [(status headers in) (connecton-fn single-url
                                                        #:method #"POST"
                                                        #:headers headers
                                                        #:data data)]
-                    [(result-json) (read-json in)])
-        (dprintf "Received result: ~a\n" (pretty-format result-json))
+                    [(input) (port->string in #:close? #t)]
+                    [(_) (dprintf "<< received json: ~a\n" input)]
+                    [(result-json) (string->jsexpr input )])
+        (dprintf "<< received result: ~a\n" (pretty-format result-json))
         (result:decode-result sym result-json)))
 
     (define/private (prepare-data stat)
