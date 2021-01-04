@@ -79,6 +79,16 @@ Other functions are also supported.
     (printf "John's friend ~a's friend is ~a\n" friend fof))
 ]
 
+Queries can include parameters. You can either provide a @racket[hash] with all params
+or list their values in the order in which they appear in the query. Keys of the hash
+must be symbols. When the same parameter occurs more then one time in the query, you must
+use a hash parameter
+
+@examples[#:eval the-eval
+(query-rows neo4j-c "MATCH (john {name: $name})-[:FRIEND]->()-[:FRIEND]->(fof) WHERE fof.name =~ 'St.*' RETURN john.name, fof.name" (hash 'name "John"))
+(query-rows neo4j-c "MATCH (john {name: $name})-[:FRIEND]->()-[:FRIEND]->(fof) WHERE fof.name =~ 'St.*' RETURN john.name, fof.name" #hash((name ."John")))
+(query-rows neo4j-c "MATCH (john {name: $name})-[:FRIEND]->()-[:FRIEND]->(fof) WHERE fof.name =~ 'St.*' RETURN john.name, fof.name" "John")
+]
 
 @examples[#:eval the-eval #:hidden
 ;; Cleanup

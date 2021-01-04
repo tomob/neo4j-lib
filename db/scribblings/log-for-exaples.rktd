@@ -156,6 +156,27 @@
  ((3) 0 () 0 () () (c values c (void)))
  #"John's friend Sara's friend is Maria\nJohn's friend Joe's friend is Steve\n"
  #"")
+((query-rows
+  neo4j-c
+  "MATCH (john {name: $name})-[:FRIEND]->()-[:FRIEND]->(fof) WHERE fof.name =~ 'St.*' RETURN john.name, fof.name"
+  (hash 'name "John"))
+ ((3) 0 () 0 () () (c values c (c (v! (u . "John") (u . "Steve")))))
+ #""
+ #"")
+((query-rows
+  neo4j-c
+  "MATCH (john {name: $name})-[:FRIEND]->()-[:FRIEND]->(fof) WHERE fof.name =~ 'St.*' RETURN john.name, fof.name"
+  #hash((name . "John")))
+ ((3) 0 () 0 () () (c values c (c (v! (u . "John") (u . "Steve")))))
+ #""
+ #"")
+((query-rows
+  neo4j-c
+  "MATCH (john {name: $name})-[:FRIEND]->()-[:FRIEND]->(fof) WHERE fof.name =~ 'St.*' RETURN john.name, fof.name"
+  "John")
+ ((3) 0 () 0 () () (c values c (c (v! (u . "John") (u . "Steve")))))
+ #""
+ #"")
 ((query-exec neo4j-c "MATCH p=(n)-[r:FRIEND]->(f) delete n,r,f")
  ((3) 0 () 0 () () (c values c (void)))
  #""

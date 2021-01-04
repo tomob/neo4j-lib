@@ -6,7 +6,9 @@
          racket/port
          net/url
          json
+         "dbsystem.rkt"
          db/private/generic/interfaces
+         db/private/generic/prepared
          db/private/generic/common)
 
 (provide neo4j-connect)
@@ -38,13 +40,44 @@
                     (hash-ref (car errors) 'message)
                     null))
 
+;; gets param names as symbols
+(define (get-params query)
+  (let-values ([(params _in-str in-param param)
+                (for/fold ([params '()]
+                           [in-str #f]
+                           [in-param #f]
+                           [param ""])
+                          ([char (in-string query)])
+                  (cond
+                    [(char=? char #\")
+                     (values params (not in-str) in-param param)]
+                    [(and (not in-str) (char=? char #\$))
+                     (values params in-str #t "")]
+                    [(and in-param (or (char-alphabetic? char) (char-numeric? char) (member char '(#\_) char=?)))
+                     (values params in-str in-param (string-append param (string char)))]
+                    [in-param
+                     (values (cons (string->symbol param) params) in-str #f "")]
+                    [else
+                     (values params in-str in-param param)] ))] )
+    (reverse (remove-duplicates (if in-param ;; Case when param ends the query
+                                    (cons (string->symbol param) params)
+                                    params)))))
+
+(define (convert-params prep hash-or-list)
+  (if (and (= 1 (length hash-or-list)) (hash? (first hash-or-list)))
+      (first hash-or-list)
+      (for/hash ([param (get-params (send prep get-stmt))]
+                 [val hash-or-list])
+        (values param val))))
+
 (define connection%
-  (class* transactions% (connection<%>)
+  (class* statement-cache% (connection<%>)
     (inherit dprintf
              call-with-lock
              get-tx-status)
     (init-field [connecton-fn http-sendrecv/url])
     (inherit-field DEBUG?)
+    (super-new)
 
     (define connected #f)
     (define tx-url null)
@@ -53,7 +86,6 @@
                       #"Content-Type: application/json"))
     (define info null)
 
-    (super-new)
 
     (define/public (start-connection-protocol server port database user password)
       (let*-values ([(disc-url) (discovery-url server port)]
@@ -64,7 +96,7 @@
     (define/private (setup-object parsed-info database)
       (set! connected #t)
       (set! info parsed-info)
-      (when DEBUG? (dprintf "** connected to ~a\n" (pretty-format info)))
+      (when DEBUG? (dprintf "  ** connected to ~a\n" (pretty-format info)))
       (set! tx-url (string->url (string-replace (hash-ref info 'transaction) "{databaseName}" database)))
       (set! single-url (string->url (string-append (url->string tx-url) "/commit"))))
 
@@ -81,7 +113,7 @@
 
     ;; get-dbsystem  : -> dbsystem<%>
     (define/public (get-dbsystem)
-      null)
+      dbsystem)
 
     ;; query         : symbol statement boolean -> QueryResult
     (define/public (query sym statement cursor?)
@@ -99,26 +131,49 @@
 
     (define/private (query:single-query sym statement)
       (let*-values ([(data) (prepare-data statement)]
-                    [(_) (dprintf ">> sending request: ~a\n" (pretty-format data))]
+                    [(_) (dprintf "  >> sending request: ~a\n" (pretty-format data))]
                     [(status headers in) (connecton-fn single-url
                                                        #:method #"POST"
                                                        #:headers headers
                                                        #:data data)]
                     [(input) (port->string in #:close? #t)]
-                    [(_) (dprintf "<< received json: ~a\n" input)]
                     [(result-json) (string->jsexpr input )])
-        (dprintf "<< received result: ~a\n" (pretty-format result-json))
+        (dprintf "  << received result: ~a\n" (pretty-format result-json))
         (result:decode-result sym result-json)))
 
-    (define/private (prepare-data stat)
-      (jsexpr->string (hash `statements (list (hash `statement stat `includeStats  #t)))))
+    (define/private (prepare-data binding)
+      (cond
+        [(statement-binding? binding) (prepare:bound-statement binding)]
+        [else (prepare:simple-query binding)]))
+
+    (define/private (prepare:bound-statement binding)
+      (let* ([prep (statement-binding-pst binding)]
+             [params (convert-params prep (statement-binding-params binding))]
+             [query (send prep get-stmt)])
+      (jsexpr->string (hash 'statements (list (hash 'statement query
+                                                    'parameters params
+                                                    'includeStats  #t))))))
+
+    (define/private (prepare:simple-query stmt)
+      (jsexpr->string (hash 'statements (list (hash 'statement stmt
+                                                    'includeStats  #t)))))
 
     (define/private (result:decode-result sym result)
       (decode-result sym result))
 
-    ;; prepare       : symbol preparable boolean -> prepared-statement<%>
-    (define/public (prepare)
-      null)
+    (define/override (prepare1* fsym sql close-on-exec? stmt-type)
+      (new prepared-statement%
+          (handle "stmt")
+          (close-on-exec? close-on-exec?)
+          (param-typeids (for/list ([_ (length (get-params sql))]) 'any))
+          (result-dvecs (list #('any))) ;;TODO Should this return the right number of return values?
+          (stmt-type 'statement)
+          (stmt sql)
+          (owner this)))
+
+    (define/override (classify-stmt stmt)
+      ;; Never use statemet cache
+      #f)
 
     ;; fetch/cursor  : symbol cursor nat -> #f or (listof vector)
     (define/public (fetch/cursor)
@@ -145,7 +200,8 @@
       null)
 
     ;; free-statement     : prepared-statement<%> boolean -> void
-    (define/public (free-statement)
+    (define/public (free-statement stmt needs-lock?)
+      (dprintf "  ** free-statement ~a ~a\n" stmt needs-lock?)
       null)
     ))
 
