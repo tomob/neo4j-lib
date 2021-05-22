@@ -107,6 +107,48 @@ and transaction cannot be nested.
 (query-rows neo4j-c "MATCH (dave:Person {name: 'Dave'})-[:FRIEND]->(who) RETURN who.name")
 ]
 
+@subsection{Prepared statements}
+
+Prepared statemtents can be used, although they are handled completely at the client side, no
+resources are allocated at the server.
+
+@examples[#:eval the-eval
+(define johns-fof
+  (prepare neo4j-c "MATCH (john {name: $name})-[:FRIEND]->()-[:FRIEND]->(fof) WHERE fof.name =~ 'St.*' RETURN john.name, fof.name"))
+(query-rows neo4j-c johns-fof "John")
+(define bound-stmt (bind-prepared-statement johns-fof '("John")))
+(query-rows neo4j-c bound-stmt)
+]
+
+@subsection{Unsupported features}
+
+For the obvious reason, @racket[list-tables] and @racket[table-exists?] are
+not supported.
+
+@examples[#:eval the-eval #:label #f
+(eval:error (list-tables neo4j-c))
+(eval:error (table-exists? neo4j-c "a-table"))
+]
+
+
+When using @racket[in-query], @italic{#:fetch} parameter must always be set to @code{+inf.0}.
+Otherwise @racket[db] will expect a cursor to be returned from query, and cursors are not supported.
+
+@examples[#:eval the-eval
+(for/list ([(john fof)
+            (in-query
+              neo4j-c
+              "MATCH (john {name: 'John'})-[:FRIEND]->()-[:FRIEND]->(fof) RETURN john.name, fof.name")])
+  fof)
+(eval:error
+(for/list ([(john fof)
+            (in-query
+              neo4j-c
+              "MATCH (john {name: 'John'})-[:FRIEND]->()-[:FRIEND]->(fof) RETURN john.name, fof.name"
+              #:fetch 1)])
+  fof))
+]
+
 @examples[#:eval the-eval #:hidden
 ;; Cleanup
 (query-exec neo4j-c "MATCH p=(n)-[r:FRIEND]->(f) delete n,r,f")

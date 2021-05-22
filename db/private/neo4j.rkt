@@ -202,8 +202,8 @@
       this)
 
     ;; list-tables   : symbol symbol -> (listof string)
-    (define/public (list-tables)
-      null)
+    (define/public (list-tables sym _)
+      (error/no-support sym "listing tables"))
 
     ;; Transactions
     (define/override (start-transaction* sym isolation option)

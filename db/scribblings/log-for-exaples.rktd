@@ -105,7 +105,7 @@
    c
    (0
     (c (u . "john.name") c (u . "fof.name"))
-    (c (v! (u . "John") (u . "Steve")) c (v! (u . "John") (u . "Maria"))))))
+    (c (v! (u . "John") (u . "Maria")) c (v! (u . "John") (u . "Steve"))))))
  #""
  #"")
 ((query-rows
@@ -120,7 +120,7 @@
   (c
    values
    c
-   (c (v! (u . "John") (u . "Steve")) c (v! (u . "John") (u . "Maria")))))
+   (c (v! (u . "John") (u . "Maria")) c (v! (u . "John") (u . "Steve")))))
  #""
  #"")
 ((query-row
@@ -132,7 +132,7 @@
 ((query-list
   neo4j-c
   "MATCH (john {name: 'John'})-[:FRIEND]->()-[:FRIEND]->(fof) RETURN fof.name")
- ((3) 0 () 0 () () (c values c (c (u . "Steve") c (u . "Maria"))))
+ ((3) 0 () 0 () () (c values c (c (u . "Maria") c (u . "Steve"))))
  #""
  #"")
 ((query-value
@@ -154,7 +154,7 @@
      "MATCH (john {name: 'John'})-[:FRIEND]->(friend)-[:FRIEND]->(fof) RETURN friend.name, fof.name")))
   (printf "John's friend ~a's friend is ~a\n" friend fof))
  ((3) 0 () 0 () () (c values c (void)))
- #"John's friend Joe's friend is Steve\nJohn's friend Sara's friend is Maria\n"
+ #"John's friend Sara's friend is Maria\nJohn's friend Joe's friend is Steve\n"
  #"")
 ((query-rows
   neo4j-c
@@ -195,6 +195,73 @@
   neo4j-c
   "MATCH (dave:Person {name: 'Dave'})-[:FRIEND]->(who) RETURN who.name")
  ((3) 0 () 0 () () (q values ()))
+ #""
+ #"")
+((define johns-fof
+   (prepare
+    neo4j-c
+    "MATCH (john {name: $name})-[:FRIEND]->()-[:FRIEND]->(fof) WHERE fof.name =~ 'St.*' RETURN john.name, fof.name"))
+ ((3) 0 () 0 () () (c values c (void)))
+ #""
+ #"")
+((query-rows neo4j-c johns-fof "John")
+ ((3) 0 () 0 () () (c values c (c (v! (u . "John") (u . "Steve")))))
+ #""
+ #"")
+((define bound-stmt (bind-prepared-statement johns-fof '("John")))
+ ((3) 0 () 0 () () (c values c (void)))
+ #""
+ #"")
+((query-rows neo4j-c bound-stmt)
+ ((3) 0 () 0 () () (c values c (c (v! (u . "John") (u . "Steve")))))
+ #""
+ #"")
+((list-tables neo4j-c)
+ ((3)
+  0
+  ()
+  0
+  ()
+  ()
+  (q exn "list-tables: feature not supported\n  feature: listing tables"))
+ #""
+ #"")
+((table-exists? neo4j-c "a-table")
+ ((3)
+  0
+  ()
+  0
+  ()
+  ()
+  (q exn "table-exists?: feature not supported\n  feature: listing tables"))
+ #""
+ #"")
+((for/list
+  (((john fof)
+    (in-query
+     neo4j-c
+     "MATCH (john {name: 'John'})-[:FRIEND]->()-[:FRIEND]->(fof) RETURN john.name, fof.name")))
+  fof)
+ ((3) 0 () 0 () () (c values c (c (u . "Maria") c (u . "Steve"))))
+ #""
+ #"")
+((for/list
+  (((john fof)
+    (in-query
+     neo4j-c
+     "MATCH (john {name: 'John'})-[:FRIEND]->()-[:FRIEND]->(fof) RETURN john.name, fof.name"
+     #:fetch
+     1)))
+  fof)
+ ((3)
+  0
+  ()
+  0
+  ()
+  ()
+  (q
+   exn
+   "in-query: query did not return cursor\n  statement: \"MATCH (john {name: 'John'})-[:FRIEND]->()-[:FRIEND]->(fof) RETURN john.name, fof.name\""))
  #""
  #"")
 ((query-exec neo4j-c "MATCH p=(n)-[r:FRIEND]->(f) delete n,r,f")
