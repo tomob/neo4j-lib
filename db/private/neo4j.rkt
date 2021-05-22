@@ -5,6 +5,7 @@
          racket/list
          racket/port
          net/url
+         net/head
          json
          "dbsystem.rkt"
          db/private/generic/interfaces
@@ -70,11 +71,19 @@
                  [val hash-or-list])
         (values param val))))
 
+(define (parse-headers headers)
+  (define (parse-header header)
+    (let ([parsed (first (extract-all-fields header))])
+      (cons (string->symbol (bytes->string/utf-8 (car parsed)))
+            (bytes->string/utf-8 (cdr parsed)))))
+  (make-hash (map parse-header headers)))
+
 (define connection%
   (class* statement-cache% (connection<%>)
     (inherit dprintf
              call-with-lock
-             get-tx-status)
+             get-tx-status
+             set-tx-status!)
     (init-field [connecton-fn http-sendrecv/url])
     (inherit-field DEBUG?)
     (super-new)
@@ -85,6 +94,9 @@
     (define headers '(#"Accept: application/json"
                       #"Content-Type: application/json"))
     (define info null)
+    (define current-transaction-url null)
+    (define current-transaction-commit-url null)
+    (define current-transaction-expiry null)
 
 
     (define/public (start-connection-protocol server port database user password)
@@ -127,19 +139,25 @@
         (query:single-query sym statement)))
 
     (define/private (query:in-transaction sym statement)
-      null)
+      (let-values ([(result-json _) (util:send-and-receive-json current-transaction-url
+                                                                (prepare-data statement))])
+        (result:decode-result sym result-json)))
 
     (define/private (query:single-query sym statement)
-      (let*-values ([(data) (prepare-data statement)]
-                    [(_) (dprintf "  >> sending request: ~a\n" (pretty-format data))]
-                    [(status headers in) (connecton-fn single-url
-                                                       #:method #"POST"
+      (let-values ([(result-json _) (util:send-and-receive-json single-url
+                                                                (prepare-data statement))])
+        (result:decode-result sym result-json)))
+
+    (define/private (util:send-and-receive-json url data [method #"POST"])
+      (dprintf "  >> sending ~a request to ~a: ~a\n" method (url->string url) (pretty-format data))
+      (let*-values ([(status headers in) (connecton-fn url
+                                                       #:method method
                                                        #:headers headers
                                                        #:data data)]
                     [(input) (port->string in #:close? #t)]
                     [(result-json) (string->jsexpr input )])
         (dprintf "  << received result: ~a\n" (pretty-format result-json))
-        (result:decode-result sym result-json)))
+        (values result-json headers)))
 
     (define/private (prepare-data binding)
       (cond
@@ -181,7 +199,7 @@
 
     ;; get-base      : -> connection<%> or #f (#f means base isn't fixed)
     (define/public (get-base)
-      null)
+      this)
 
     ;; list-tables   : symbol symbol -> (listof string)
     (define/public (list-tables)
@@ -189,20 +207,62 @@
 
     ;; Transactions
     (define/override (start-transaction* sym isolation option)
-      null)
+      (cond
+        [(get-tx-status) (error/no-support sym "nested transactions")]
+        [isolation (error/no-support sym "isolation level other than database-dependent")]
+        [else
+         (begin
+           (dprintf "  ** starting transaction\n")
+           (let-values ([(result headers) (util:send-and-receive-json tx-url (jsexpr->string (hash 'statements '())))])
+             (tx:decode-transaction-start sym result headers)
+             (set-tx-status! sym #t)))]))
 
-    ;; end-transaction    : symbol (U 'commit 'rollback) boolean -> void
-    (define/override (end-transaction)
-      null)
+    (define/override (end-transaction* sym mode _savepoint)
+      (case mode
+        [(rollback) (tx:rollback sym)]
+        [(commit) (tx:commit sym)]))
 
-    ;; transaction-status : symbol -> (U boolean 'invalid)
-    (define/override (transaction-status)
-      null)
+    (define/private (tx:rollback sym)
+      (dprintf "  ** rolling back transaction\n")
+      (let-values ([(result headers) (util:send-and-receive-json current-transaction-url
+                                                                 (jsexpr->string (hash 'statements '()))
+                                                                 #"DELETE")])
+        (tx:decode-transaction-end sym result headers)
+        (set-tx-status! sym #f)))
 
-    ;; free-statement     : prepared-statement<%> boolean -> void
-    (define/public (free-statement stmt needs-lock?)
-      (dprintf "  ** free-statement ~a ~a\n" stmt needs-lock?)
-      null)
+    (define/private (tx:commit sym)
+      (dprintf "  ** commiting transaction\n")
+      (let-values ([(result headers) (util:send-and-receive-json current-transaction-commit-url
+                                                                 (jsexpr->string (hash 'statements '())))])
+        (tx:decode-transaction-end sym result headers)
+        (set-tx-status! sym #f)))
+
+    (define/private (tx:decode-transaction-start sym result headers)
+      (let ([errors (hash-ref result 'errors)])
+        (if (not (empty? errors))
+            (raise-error sym errors)
+            (let ([commit-url (hash-ref result 'commit)]
+                  [transaction-url (hash-ref (parse-headers headers) 'Location)]
+                  [transaction (hash-ref result 'transaction)])
+              (set! current-transaction-url (string->url transaction-url))
+              (set! current-transaction-commit-url (string->url commit-url))
+              (set! current-transaction-expiry (hash-ref transaction 'expires))
+              (dprintf "  ** transaction transaction url ~a\n" transaction-url)
+              (dprintf "  ** transaction commit url ~a\n" commit-url)
+              (dprintf "  ** transaction expiry ~a\n" current-transaction-expiry)))))
+
+    (define/private (tx:decode-transaction-end sym result headers)
+      (let ([errors (hash-ref result 'errors)])
+        (if (not (empty? errors))
+            (raise-error sym errors)
+            (begin
+              (set! current-transaction-url null)
+              (set! current-transaction-commit-url null)
+              (set! current-transaction-expiry null)))))
+
+    (define/public (free-statement _stmt _needs-lock?)
+      ;; No resources allocated on server, no need for any cleenup
+      (void))
     ))
 
 (define (neo4j-connect #:server [server "localhost"]

@@ -79,6 +79,9 @@ Other functions are also supported.
     (printf "John's friend ~a's friend is ~a\n" friend fof))
 ]
 
+
+@subsection{Parameters}
+
 Queries can include parameters. You can either provide a @racket[hash] with all params
 or list their values in the order in which they appear in the query. Keys of the hash
 must be symbols. When the same parameter occurs more then one time in the query, you must
@@ -88,6 +91,20 @@ use a hash parameter
 (query-rows neo4j-c "MATCH (john {name: $name})-[:FRIEND]->()-[:FRIEND]->(fof) WHERE fof.name =~ 'St.*' RETURN john.name, fof.name" (hash 'name "John"))
 (query-rows neo4j-c "MATCH (john {name: $name})-[:FRIEND]->()-[:FRIEND]->(fof) WHERE fof.name =~ 'St.*' RETURN john.name, fof.name" #hash((name ."John")))
 (query-rows neo4j-c "MATCH (john {name: $name})-[:FRIEND]->()-[:FRIEND]->(fof) WHERE fof.name =~ 'St.*' RETURN john.name, fof.name" "John")
+]
+
+@subsection{Transactions}
+
+Transactions are supported but with two limitations: only managed transaction can
+be used (i.e. those created with @racket[start-transaction] or @racket[call-with-transaction])
+and transaction cannot be nested.
+
+@examples[#:eval the-eval
+(start-transaction neo4j-c)
+(query-exec neo4j-c "MATCH (bob:Person {name: 'Bob'}) MATCH (dave:Person {name: 'Dave'}) CREATE (dave)-[:FRIEND]->(bob)")
+(query-value neo4j-c "MATCH (dave:Person {name: 'Dave'})-[:FRIEND]->(who) RETURN who.name")
+(rollback-transaction neo4j-c)
+(query-rows neo4j-c "MATCH (dave:Person {name: 'Dave'})-[:FRIEND]->(who) RETURN who.name")
 ]
 
 @examples[#:eval the-eval #:hidden

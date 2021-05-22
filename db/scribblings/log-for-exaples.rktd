@@ -105,7 +105,7 @@
    c
    (0
     (c (u . "john.name") c (u . "fof.name"))
-    (c (v! (u . "John") (u . "Maria")) c (v! (u . "John") (u . "Steve"))))))
+    (c (v! (u . "John") (u . "Steve")) c (v! (u . "John") (u . "Maria"))))))
  #""
  #"")
 ((query-rows
@@ -120,7 +120,7 @@
   (c
    values
    c
-   (c (v! (u . "John") (u . "Maria")) c (v! (u . "John") (u . "Steve")))))
+   (c (v! (u . "John") (u . "Steve")) c (v! (u . "John") (u . "Maria")))))
  #""
  #"")
 ((query-row
@@ -132,7 +132,7 @@
 ((query-list
   neo4j-c
   "MATCH (john {name: 'John'})-[:FRIEND]->()-[:FRIEND]->(fof) RETURN fof.name")
- ((3) 0 () 0 () () (c values c (c (u . "Maria") c (u . "Steve"))))
+ ((3) 0 () 0 () () (c values c (c (u . "Steve") c (u . "Maria"))))
  #""
  #"")
 ((query-value
@@ -154,7 +154,7 @@
      "MATCH (john {name: 'John'})-[:FRIEND]->(friend)-[:FRIEND]->(fof) RETURN friend.name, fof.name")))
   (printf "John's friend ~a's friend is ~a\n" friend fof))
  ((3) 0 () 0 () () (c values c (void)))
- #"John's friend Sara's friend is Maria\nJohn's friend Joe's friend is Steve\n"
+ #"John's friend Joe's friend is Steve\nJohn's friend Sara's friend is Maria\n"
  #"")
 ((query-rows
   neo4j-c
@@ -175,6 +175,26 @@
   "MATCH (john {name: $name})-[:FRIEND]->()-[:FRIEND]->(fof) WHERE fof.name =~ 'St.*' RETURN john.name, fof.name"
   "John")
  ((3) 0 () 0 () () (c values c (c (v! (u . "John") (u . "Steve")))))
+ #""
+ #"")
+((start-transaction neo4j-c) ((3) 0 () 0 () () (c values c (void))) #"" #"")
+((query-exec
+  neo4j-c
+  "MATCH (bob:Person {name: 'Bob'}) MATCH (dave:Person {name: 'Dave'}) CREATE (dave)-[:FRIEND]->(bob)")
+ ((3) 0 () 0 () () (c values c (void)))
+ #""
+ #"")
+((query-value
+  neo4j-c
+  "MATCH (dave:Person {name: 'Dave'})-[:FRIEND]->(who) RETURN who.name")
+ ((3) 0 () 0 () () (c values c (u . "Bob")))
+ #""
+ #"")
+((rollback-transaction neo4j-c) ((3) 0 () 0 () () (c values c (void))) #"" #"")
+((query-rows
+  neo4j-c
+  "MATCH (dave:Person {name: 'Dave'})-[:FRIEND]->(who) RETURN who.name")
+ ((3) 0 () 0 () () (q values ()))
  #""
  #"")
 ((query-exec neo4j-c "MATCH p=(n)-[r:FRIEND]->(f) delete n,r,f")
