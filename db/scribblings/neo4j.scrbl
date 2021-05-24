@@ -13,8 +13,8 @@
                     (ev '(require db/neo4j racket/string))
                     ev))
 
-@title{Neo4j – interface to Neo4j database}
-@author{Tomasz Barański}
+@title{Neo4j – Library for accessing Neo4j database}
+@author[(author+email "Tomasz Barański" "tomasz.baranski@posteo.net")]
 
 @defmodule[db/neo4j]
 
